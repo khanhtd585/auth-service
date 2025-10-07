@@ -6,7 +6,6 @@ from typing import Optional
 import logging
 import datetime
 import json
-import redis.asyncio as redis
 
 from common.setting import get_settings
 from db.redis_client import get_redis
@@ -15,17 +14,16 @@ from schemas import (UserUpdate,
                      TokenType, UserTokenBase)
 from utils.datetime_utils import get_current_datetime
 
-import uuid
-
 logger = logging.getLogger(__name__)
 setting = get_settings()
+redis_cache = get_redis()
 
 class UserTokenRepo:
     
     @staticmethod
     async def create(db: Session, user_token: UserTokenBase) -> UserToken:
         created_at = get_current_datetime()
-        expire_at = created_at + datetime.timedelta(minutes=setting.TOKEN_TTL_MIN)
+        expire_at = created_at + datetime.timedelta(minutes=setting.TOKEN_TTL_SEC)
         new_token = UserToken(
             user_id=user_token.user_id,
             token_type=user_token.token_type,
@@ -56,14 +54,14 @@ class UserTokenRepo:
                      UserToken.token_type == token_type,
                      UserToken.expire_at >= get_current_datetime()
                      )).order_by(desc(UserToken.expire_at)))
-        token = None
         try:
-            result = await db.execute(stmt) 
-            token = result.scalar_one_or_none()
-            await UserTokenRepo.delete(db, user_id, token, TokenType.confirm)
+            result = await db.execute(stmt)
+            token_obj = result.scalar_one_or_none()
+            if token_obj:
+                await UserTokenRepo.delete(db, user_id, token, TokenType.confirm)
+                return token_obj
         except Exception as e:
             raise e
-        return token if token else None
 
     @staticmethod
     async def update(db, id: str, user_update: UserUpdate) -> None:
@@ -83,10 +81,9 @@ class UserTokenRepo:
             db.rollback()
             logger.error(f'ERROR: {e}')
             raise e
-        
+
     @staticmethod
-    async def push_token_redis(user_id: str, token: str, 
-                               redis_client:redis.Redis = Depends(get_redis().get_client)) -> bool:
+    async def push_token_redis(user_id: str, token: str) -> bool:
         """
         Push token vào Redis với user_id làm key (async)
         
@@ -100,7 +97,7 @@ class UserTokenRepo:
         """
         try:
             # Kiểm tra kết nối
-            if not await redis_client.ping():
+            if not await redis_cache.ping():
                 logger.info("❌ Không thể kết nối đến Redis!")
                 return False
             
@@ -110,16 +107,17 @@ class UserTokenRepo:
             cache_data = {
                 "token": token,
                 "user_id": user_id,
-                "created_at": datetime.now().isoformat(),
+                "created_at": get_current_datetime().isoformat(),
             }
             
             # Tạo key cho Redis
             redis_key = f"token_{TokenType.confirm.value}:{user_id}"
             
             # Lưu vào Redis với TTL
+            redis_client = await redis_cache.get_client()
             await redis_client.setex(
                 redis_key,
-                setting.TOKEN_TTL_MIN,
+                setting.TOKEN_TTL_SEC,
                 json.dumps(cache_data)
             )
             
@@ -138,7 +136,7 @@ class UserTokenRepo:
             return False
         
     @staticmethod
-    async def verify_token_redis(user_id: str, redis_client:redis.Redis = Depends(get_redis().get_client)) -> bool:
+    async def verify_token_redis(user_id: str) -> bool:
         """
         Lấy token từ Redis theo user_id (async)
         
@@ -150,16 +148,17 @@ class UserTokenRepo:
         """
         try:
             # Kiểm tra kết nối
-            if not await redis_client.ping():
+            if not await redis_cache.ping():
                 logger.info("❌ Không thể kết nối đến Redis!")
                 return None
             
             logger.info("✅ Đã kết nối Redis thành công!")
             
             # Tạo key cho Redis
-            redis_key = f"toekn_{TokenType.confirm.value}:{user_id}"
+            redis_key = f"token_{TokenType.confirm.value}:{user_id}"
             
             # Lấy data từ Redis
+            redis_client = await redis_cache.get_client()
             cached_data = await redis_client.get(redis_key)
             
             if not cached_data:
@@ -177,10 +176,8 @@ class UserTokenRepo:
             logger.info(f"✅ Đã tìm thấy token cho user_id: {user_id}")
             logger.info(f"   Key: {redis_key}")
             logger.info(f"   TTL còn lại: {ttl} giây (~{ttl//60} phút {ttl%60} giây)")
-            logger.info(f"\n📦 Thông tin token:")
             logger.info(f"   Token: {token_data['token'][:30]}..." if len(token_data['token']) > 30 else f"   Token: {token_data['token']}")
             logger.info(f"   Created at: {token_data['created_at']}")
-            logger.info(f"   Metadata: {json.dumps(token_data['metadata'], indent=6)}")
             
             await redis_client.delete(redis_key)
             

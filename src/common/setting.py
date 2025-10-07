@@ -34,7 +34,7 @@ class Settings(BaseSettings):
     REDIS_PORT: int = 6379
     REDIS_DB: int = 0  # 15m
     DECODE_RESPONSES: bool = True
-    TOKEN_TTL_MIN: int = 1
+    TOKEN_TTL_SEC: int = 5 * 60
 
 
 

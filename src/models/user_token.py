@@ -9,11 +9,12 @@ class UserToken(Base):
         ACCESS = 'access'
         REFRESH = 'refresh'
         CONFIRM = 'confirm'
-    user_id = Column(String(36), primary_key=True)
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid1()))
+    user_id = Column(String(36))
+    token =  Column(Text)
     token_type =  Column(
         Enum('access', 'refresh', 'confirm'), 
         nullable=False, 
     )
-    token =  Column(Text)
     created_at = Column(DateTime(timezone=True), nullable=False)
     expire_at = Column(DateTime(timezone=True), nullable=False)
