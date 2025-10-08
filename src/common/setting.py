@@ -35,7 +35,12 @@ class Settings(BaseSettings):
     REDIS_DB: int = 0  # 15m
     DECODE_RESPONSES: bool = True
     TOKEN_TTL_SEC: int = 5 * 60
-
+    
+    GOOGLE_CLIENT_ID: str = None
+    GOOGLE_REDIRECT_URI: str = None
+    GOOGLE_CLIENT_SECRET: str = None
+    
+    FE_URI: str = "http://localhost:3000"
 
 
 

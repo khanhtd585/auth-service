@@ -41,7 +41,7 @@ class UserRepo:
     
     @staticmethod
     async def get_by_id(db: Session, id: str) -> Optional[User]:
-        stmt = select(User).where(User.id == id) 
+        stmt = select(User).where(User.id == id)
         result = await db.execute(stmt) 
         user = result.scalar_one_or_none() 
         return user if user else None

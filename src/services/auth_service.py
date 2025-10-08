@@ -4,11 +4,15 @@ import logging
 
 from schemas import (LoginRequest, LoginResponse, UserUpdate, 
                      TokenType, UserStatus, UserRead,
-                     UserTokenBase, RefreshTokenResponse)
+                     UserTokenBase, RefreshTokenResponse,
+                     UserCreate, RegisterReponse,
+                     
+                     )
 from repo import UserRepo, UserTokenRepo
 from utils.hash_utils import verify_password
 from utils.jwt_utils import create_jwt_token, verify_jwt_token
 from utils.datetime_utils import get_current_datetime
+from utils.hash_utils import hash_password
 from utils.utils import generate_confirm_token
 
 logger = logging.getLogger(__name__)
@@ -92,3 +96,88 @@ class AuthService:
         await UserTokenRepo.push_token_redis(user_id, confirm_token.token)
         
         return RefreshTokenResponse(confirm_token=confirm_token.token)
+    
+    @staticmethod
+    async def register_user(db: Session, user_in: UserCreate) -> RegisterReponse:
+        # Check email tồn tại chưa
+        existing = await UserRepo.get_by_email(db, user_in.email)
+        if existing:
+            logger.error(f'Email ({existing.email}) already registered')
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Email already registered",
+            )
+
+        # Hash password
+        user_in.password = hash_password(user_in.password)
+        logger.info('Hash password')
+        
+        # Create new user
+        new_user = await UserRepo.create(db, user_in)
+        logger.info('Create user')
+        
+        # Create confirm token
+        user_token = UserTokenBase(
+            user_id=new_user.id,
+            token_type=TokenType.confirm,
+            token=generate_confirm_token(6),
+        )
+        confirm_token = await UserTokenRepo.create(db, user_token)
+        await UserTokenRepo.push_token_redis(new_user.id, confirm_token.token)
+        
+        # Response user
+        user_rs = RegisterReponse(
+            id=new_user.id,
+            created_at=new_user.created_at,
+            updated_at=new_user.updated_at,
+            last_login_at=new_user.last_login_at,
+            email=new_user.email,
+            user_name=new_user.user_name,
+            status=new_user.status,
+            confirm_token=confirm_token.token,
+        )
+        
+        logger.info('Response user')
+        return user_rs
+    
+    
+    @staticmethod
+    async def login_gg(db: Session, data: dict) -> LoginResponse:
+        # Check email tồn tại chưa
+        user_db = await UserRepo.get_by_email(db, data['email'])
+        if user_db:
+            logger.info(f'Email ({user_db.email}) exist and login by google auth')
+        else:
+            user_in = UserCreate(
+                email=data['email'],
+                user_name=data['name'],
+                password=generate_confirm_token(),
+            )
+
+            # Hash password
+            user_in.password = hash_password(user_in.password)
+            logger.info('Hash password')
+            
+            # Create new user
+            user_db = await UserRepo.create(db, user_in)
+            logger.info('Create user')
+        
+        # Tạo JWT token
+        user_data  = {
+                        "user_id": user_db.id,
+                        "email": user_db.email, 
+                        "name": user_db.user_name,
+                        "role": "user"
+                    }
+        access_token, exp, refresh_token = create_jwt_token(user_data)
+        
+        response = LoginResponse(
+            access_token=access_token,
+            refresh_token=refresh_token,
+            expires_in=exp,
+            token_type="Bearer"
+        )
+        
+        # Update last login
+        await UserRepo.update(db, user_db.id, UserUpdate(id=user_db.id, last_login_at=get_current_datetime()))
+        return response
