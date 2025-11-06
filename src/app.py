@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from common.setting import get_settings
-from api.v1 import api_v1_router
+# from api.v1 import api_v1_router
 from middlewares.request_id import RequestIDMiddleware
 import logging
 
@@ -12,7 +12,7 @@ app = FastAPI(title=get_settings().SERVICE_NAME)
 
 app.add_middleware(RequestIDMiddleware)
 
-app.include_router(api_v1_router)
+# app.include_router(api_v1_router)
 
 @app.get("/health")
 async def health():

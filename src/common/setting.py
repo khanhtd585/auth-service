@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     PORT: int
     DEBUG_MODE: bool = False
     SERVICE_NAME: str = 'auth_service'
+    LOG_DIR: str = './logs'
     
     # Auth Token
     PEPPER: str = 'pepsi'
